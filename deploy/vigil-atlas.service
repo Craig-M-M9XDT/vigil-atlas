@@ -8,6 +8,8 @@ WorkingDirectory=/opt/vigil-atlas
 ExecStart=/opt/vigil-atlas/VigilAtlas --urls http://0.0.0.0:5080
 Restart=on-failure
 User=pi
+# Headless service: don't try to open a window (remove for a desktop Pi that should show the app)
+Environment=Window=none
 # Optional: free UCDP token enables the ucdpEvents layer
 # Environment=Ucdp__Token=YOUR_TOKEN
 

@@ -98,7 +98,7 @@ const VIEWS = {
   asia:{lat:30,lon:105,zoom:2.8}, us:{lat:39,lon:-98,zoom:3.2},
 };
 const q = new URLSearchParams(location.search);
-const on = new Set((q.get('layers') || 'hotspots,conflicts,cables').split(',').filter(n => LAYERS[n]));
+const on = new Set((q.get('layers') ?? 'hotspots,conflicts,bases,nuclear,irradiators,radiationWatch,spaceports,cables,pipelines,military,ucdpEvents,weather,sanctions').split(',').filter(n => LAYERS[n]));
 const v0 = VIEWS[q.get('view')] || VIEWS.eu;
 const num = (k, d) => isFinite(parseFloat(q.get(k))) ? parseFloat(q.get(k)) : d;
 const $ = id => document.getElementById(id);
@@ -259,7 +259,7 @@ map.on('moveend', syncUrl);
 new ResizeObserver(() => map.resize()).observe($('map'));
 map.on('load', async () => {
   const initial = [...on]; on.clear();
-  for (const n of initial) await setLayer(n, true);
+  await Promise.all(initial.map(n => setLayer(n, true)));
   renderStatus();
 });
 </script>

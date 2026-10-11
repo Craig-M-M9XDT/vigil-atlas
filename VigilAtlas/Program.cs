@@ -14,7 +14,26 @@ builder.Services.AddSingleton<OverpassService>();
 builder.Services.AddSingleton<GdeltService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<GdeltService>());
 
+// Pick a free local port (default 5080) unless the user supplied --urls / ASPNETCORE_URLS.
+if (string.IsNullOrEmpty(builder.Configuration["urls"]) && string.IsNullOrEmpty(builder.Configuration["ASPNETCORE_URLS"]))
+{
+    var port = 5080;
+    while (!PortFree(port) && port < 5100) port++;
+    builder.WebHost.UseUrls($"http://localhost:{port}");
+}
+static bool PortFree(int p)
+{
+    try { var l = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, p); l.Start(); l.Stop(); return true; }
+    catch { return false; }
+}
+
 var app = builder.Build();
+app.Lifetime.ApplicationStarted.Register(() =>
+{
+    var url = app.Urls.FirstOrDefault()?.Replace("0.0.0.0", "localhost").Replace("[::]", "localhost");
+    app.Logger.LogInformation("Vigil Atlas running at {Url}", url);
+    if (url is not null) WindowLauncher.Launch(url, app.Configuration["Window"] ?? "app", app.Lifetime, app.Logger);
+});
 app.UseResponseCompression();
 app.UseDefaultFiles();
 app.UseStaticFiles();

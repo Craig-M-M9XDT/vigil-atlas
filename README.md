@@ -24,10 +24,18 @@ Shareable URL state: `?lat=50&lon=15&zoom=3.5&view=eu&timeRange=6h&layers=confli
 The time range (1h/6h/24h) filters conflicts, quakes and ucdpEvents.
 
 ## Run (Windows or Linux)
+Starting the program opens the dashboard in its own app window (Edge, Chrome or Chromium in `--app` mode, no tabs or
+address bar) with all layers selected, centred on Europe with a 6h range. Closing the window stops the server.
 ```
 cd VigilAtlas
-dotnet run --urls http://localhost:5080
+dotnet run
 ```
+Options (environment variable or command line, e.g. `--Window=none`):
+- `Window=app` (default) own window; `Window=browser` default browser tab; `Window=none` headless/service (no window)
+- `--urls http://0.0.0.0:5080` serve on the network (otherwise a free local port from 5080 is used)
+
+On a Pi, the window opens only when a desktop session is running (`DISPLAY`/`WAYLAND_DISPLAY`) and Chromium is installed.
+The systemd service sets `Window=none`.
 
 ## Raspberry Pi
 ```
