@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vigil Atlas</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<style>
+  /* Aether-style theme: deep indigo night, violet/cyan glow, frosted glass panels */
+  :root { --bg:#070816; --panel:rgba(18,16,42,.78); --edge:rgba(140,120,255,.28);
+          --fg:#e6e8ff; --mut:#8f94c4; --acc:#8b7bff; --acc2:#4de0ff; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg); font:13px Inter,system-ui,sans-serif; }
+  #map { position:absolute; inset:0; }
+  .panel { position:absolute; top:12px; max-height:calc(100% - 24px); overflow:auto; z-index:2;
+           background:var(--panel); border:1px solid var(--edge); border-radius:12px; padding:12px 14px;
+           backdrop-filter:blur(14px); box-shadow:0 0 32px rgba(139,123,255,.18); }
+  #panel { left:12px; width:240px; }
+  #feed { right:56px; width:290px; }
+  h1 { font-size:14px; margin:0 0 8px; letter-spacing:.14em; text-transform:uppercase;
+       background:linear-gradient(90deg,var(--acc),var(--acc2)); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  h2 { font-size:11px; margin:0 0 8px; letter-spacing:.12em; text-transform:uppercase; color:var(--mut); }
+  label { display:flex; align-items:center; gap:8px; padding:3px 0; cursor:pointer; }
+  label:hover { color:#fff; }
+  label .n { margin-left:auto; color:var(--mut); font-size:11px; font-variant-numeric:tabular-nums; }
+  input[type=checkbox] { accent-color:var(--acc); }
+  .dot { width:10px; height:10px; border-radius:50%; flex:none; box-shadow:0 0 8px currentColor; }
+  select { width:100%; margin:6px 0; background:rgba(7,8,22,.8); color:var(--fg); border:1px solid var(--edge); border-radius:6px; padding:5px; }
+  #status { color:var(--mut); font-size:11px; margin-top:8px; line-height:1.4; white-space:pre-line; }
+  #credits { margin-top:10px; font-size:11px; color:var(--mut); line-height:1.45; }
+  #credits summary { cursor:pointer; }
+  #credits a { color:var(--acc2); text-decoration:none; }
+  .ev { padding:6px 0; border-top:1px solid rgba(140,120,255,.14); cursor:pointer; }
+  .ev:first-of-type { border-top:0; }
+  .ev b { display:block; font-weight:600; }
+  .ev small { color:var(--mut); }
+  .ev a, .maplibregl-popup-content a { color:var(--acc2); text-decoration:none; }
+  .maplibregl-ctrl-group { background:var(--panel); border:1px solid var(--edge); backdrop-filter:blur(14px); }
+  .maplibregl-ctrl-group button { filter:invert(.85) hue-rotate(220deg); }
+  .maplibregl-popup-content { background:#14122e; color:var(--fg); border:1px solid var(--edge); border-radius:10px; padding:10px 12px; }
+  .maplibregl-popup-tip { border-top-color:#14122e !important; border-bottom-color:#14122e !important; }
+  .pop-t { font-weight:700; margin-bottom:4px; padding-right:12px; }
+  .pop-r { color:var(--mut); font-size:12px; }
+  .pop-r span { color:var(--fg); }
+  @media (max-width:760px){ #feed{ display:none; } #panel{ width:auto; right:12px; max-height:45%; } }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="panel" class="panel">
+  <h1>Vigil Atlas</h1>
+  <select id="view" aria-label="Region">
+    <option value="global">Global</option><option value="eu">Europe</option>
+    <option value="mena">MENA</option><option value="asia">Asia-Pacific</option>
+    <option value="us">North America</option>
+  </select>
+  <select id="timeRange" aria-label="Time range">
+    <option>1h</option><option>6h</option><option>24h</option>
+  </select>
+  <div id="layers"></div>
+  <div id="status">loading…</div>
+  <details id="credits">
+    <summary>Data credits</summary>
+    <p>Conflicts: data from the <a href="https://www.gdeltproject.org/" target="_blank" rel="noopener noreferrer">GDELT Project</a>.
+    Map &amp; OSM layers (nuclear, spaceports, bases, cables): © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a> (ODbL), tiles by <a href="https://openfreemap.org" target="_blank" rel="noopener noreferrer">OpenFreeMap</a>.
+    Aircraft: <a href="https://adsb.lol" target="_blank" rel="noopener noreferrer">adsb.lol</a> (ODbL).
+    Quakes: <a href="https://earthquake.usgs.gov" target="_blank" rel="noopener noreferrer">USGS</a>.
+    Radiation: Bundesamt für Strahlenschutz (<a href="https://odlinfo.bfs.de" target="_blank" rel="noopener noreferrer">ODL-Info</a>), unverified values.
+    Sanctions: US Treasury OFAC SDN list. UCDP: Davies, Pettersson &amp; Öberg, <a href="https://ucdp.uu.se" target="_blank" rel="noopener noreferrer">UCDP</a> (CC BY 4.0).
+    Radar: <a href="https://www.rainviewer.com/" target="_blank" rel="noopener noreferrer">RainViewer</a>.
+    Country centroids: <a href="https://github.com/mledoze/countries" target="_blank" rel="noopener noreferrer">mledoze/countries</a> (ODbL).
+    Built with <a href="https://maplibre.org" target="_blank" rel="noopener noreferrer">MapLibre GL JS</a> (BSD-3) and .NET (MIT). Vigil Atlas is free software under the GNU GPL v3;
+    see <a href="https://github.com/Craig-M-M9XDT/vigil-atlas/blob/main/THIRD_PARTY_NOTICES.md" target="_blank" rel="noopener noreferrer">third-party notices</a>.</p>
+  </details>
+</div>
+<div id="feed" class="panel"><h2>Top conflict events</h2><div id="events">Enable the conflicts layer.</div></div>
+
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script>
+const CONFLICT_COLOR = ['match',['get','kind'],'Mass violence','#ff2d55','Fight','#ff7a45','#ffb020'];
+const LAYERS = {
+  hotspots:       { color:'#ff9f1c', paint:'dot' },
+  conflicts:      { color:'#ff3b30', paint:'conflict', timeDep:true, refresh:300000, label:'conflicts (GDELT)' },
+  bases:          { color:'#5e9bff', paint:'dot' },
+  nuclear:        { color:'#c6f432', paint:'dot' },
+  irradiators:    { color:'#b57bff', paint:'dot' },
+  radiationWatch: { color:'#ffd60a', paint:'radiation', refresh:600000, label:'radiationWatch (DE)' },
+  spaceports:     { color:'#ffffff', paint:'dot' },
+  cables:         { color:'#00e5c0', paint:'line' },
+  pipelines:      { color:'#ff7a45', paint:'line', dash:true },
+  military:       { color:'#7aa2ff', paint:'military', refresh:20000, label:'military (ADS-B)' },
+  ucdpEvents:     { color:'#ff6b81', paint:'dot', timeDep:true },
+  quakes:         { color:'#f78fb3', paint:'quake', timeDep:true, refresh:300000 },
+  weather:        { color:'#4de0ff', paint:'raster', label:'weather (radar)' },
+  sanctions:      { color:'#e0e0e0', paint:'sanction', label:'sanctions (OFAC)' },
+};
+const VIEWS = {
+  global:{lat:20,lon:0,zoom:1.8}, eu:{lat:50,lon:15,zoom:3.5}, mena:{lat:28,lon:42,zoom:3.6},
+  asia:{lat:30,lon:105,zoom:2.8}, us:{lat:39,lon:-98,zoom:3.2},
+};
+const q = new URLSearchParams(location.search);
+const on = new Set((q.get('layers') || 'hotspots,conflicts,cables').split(',').filter(n => LAYERS[n]));
+const v0 = VIEWS[q.get('view')] || VIEWS.eu;
+const num = (k, d) => isFinite(parseFloat(q.get(k))) ? parseFloat(q.get(k)) : d;
+const $ = id => document.getElementById(id);
+const viewSel = $('view'), trSel = $('timeRange'), statusEl = $('status');
+viewSel.value = VIEWS[q.get('view')] ? q.get('view') : 'eu';
+trSel.value = ['1h','6h','24h'].includes(q.get('timeRange')) ? q.get('timeRange') : '6h';
+const notes = {}, counts = {}, timers = {};
+
+const map = new maplibregl.Map({
+  container:'map', style:'https://tiles.openfreemap.org/styles/dark',
+  center:[num('lon', v0.lon), num('lat', v0.lat)], zoom:num('zoom', v0.zoom),
+});
+map.addControl(new maplibregl.NavigationControl(), 'top-right');
+
+function syncUrl() {
+  const c = map.getCenter();
+  history.replaceState(null, '', '?' + new URLSearchParams({
+    lat:c.lat.toFixed(4), lon:c.lng.toFixed(4), zoom:map.getZoom().toFixed(2),
+    view:viewSel.value, timeRange:trSel.value, layers:[...on].join(','),
+  }));
+}
+function renderStatus() {
+  statusEl.textContent = [...on].map(n => notes[n] ? `${n}: ${notes[n]}` : '').filter(Boolean).join('\n');
+}
+
+// ---------- paint definitions ----------
+const stroke = { 'circle-stroke-color':'#000', 'circle-stroke-width':1 };
+function addPaint(id, cfg) {
+  const c = cfg.color;
+  switch (cfg.paint) {
+    case 'line': return map.addLayer({ id, type:'line', source:id,
+      paint:{ 'line-color':c, 'line-width':1.2, 'line-opacity':.8, ...(cfg.dash ? { 'line-dasharray':[3,2] } : {}) } });
+    case 'conflict': return map.addLayer({ id, type:'circle', source:id, paint:{ ...stroke,
+      'circle-color':CONFLICT_COLOR, 'circle-opacity':.75,
+      'circle-radius':['interpolate',['linear'],['get','mentions'],1,4,50,9,500,18] } });
+    case 'radiation': return map.addLayer({ id, type:'circle', source:id, paint:{
+      'circle-color':['step',['get','value'],'#4de0ff',0.2,'#ffd60a',0.5,'#ff3b30'],
+      'circle-radius':['interpolate',['linear'],['zoom'],3,1.2,6,2.5,9,5], 'circle-opacity':.65 } });
+    case 'quake': return map.addLayer({ id, type:'circle', source:id, paint:{ ...stroke,
+      'circle-color':c, 'circle-opacity':.7,
+      'circle-radius':['interpolate',['linear'],['get','mag'],2.5,3,5,9,7,20] } });
+    case 'sanction': return map.addLayer({ id, type:'circle', source:id, paint:{ ...stroke,
+      'circle-color':c, 'circle-opacity':.45,
+      'circle-radius':['interpolate',['linear'],['get','count'],1,4,50,8,500,15,5000,28] } });
+    case 'military':
+      map.addLayer({ id, type:'circle', source:id, paint:{ ...stroke, 'circle-color':c, 'circle-radius':4.5 } });
+      return map.addLayer({ id:id + '-lbl', type:'symbol', source:id, minzoom:5, layout:{
+        'text-field':['get','name'], 'text-font':['Noto Sans Regular'], 'text-size':10,
+        'text-offset':[0,1.1] }, paint:{ 'text-color':'#cdd6ff', 'text-halo-color':'#070816', 'text-halo-width':1 } });
+    default: return map.addLayer({ id, type:'circle', source:id, paint:{ ...stroke,
+      'circle-color':c, 'circle-radius':5.5, 'circle-opacity':.9 } });
+  }
+}
+
+// ---------- popups (DOM only: upstream strings are never parsed as HTML) ----------
+function popupFor(props) {
+  const box = document.createElement('div');
+  const t = document.createElement('div'); t.className = 'pop-t'; t.textContent = props.name || 'Details'; box.append(t);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === 'name' || v === null || v === '' || v === undefined || v === 'null') continue;
+    const r = document.createElement('div'); r.className = 'pop-r';
+    r.append(k + ': ');
+    const s = document.createElement('span');
+    if (k === 'url' && /^https?:\/\//i.test(v)) {
+      const a = document.createElement('a'); a.href = v; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = 'source'; s.append(a);
+    } else s.textContent = String(v);
+    r.append(s); box.append(r);
+  }
+  return box;
+}
+
+// ---------- layer loading ----------
+const hours = () => parseInt(trSel.value) || 6;
+async function load(name) {
+  const cfg = LAYERS[name], id = 'l-' + name;
+  if (cfg.paint === 'raster') return loadRadar(id);
+  let res;
+  try { res = await fetch(`/api/layers/${name}?hours=${hours()}`); if (!res.ok) throw new Error(res.status); }
+  catch (e) { notes[name] = 'unavailable (' + e.message + ')'; renderStatus(); return; }
+  const gj = await res.json();
+  const note = res.headers.get('X-Layer-Note');
+  notes[name] = note ? decodeURIComponent(note) : '';
+  counts[name] = gj.features.length;
+  if (map.getSource(id)) map.getSource(id).setData(gj);
+  else {
+    map.addSource(id, { type:'geojson', data:gj });
+    addPaint(id, cfg);
+    map.on('click', id, e => new maplibregl.Popup({ maxWidth:'280px' }).setLngLat(e.lngLat).setDOMContent(popupFor(e.features[0].properties)).addTo(map));
+    map.on('mouseenter', id, () => map.getCanvas().style.cursor = 'pointer');
+    map.on('mouseleave', id, () => map.getCanvas().style.cursor = '');
+  }
+  if (name === 'conflicts') renderEvents(gj);
+  updateCounts(); renderStatus();
+}
+async function loadRadar(id) {
+  try {
+    const meta = await (await fetch('https://api.rainviewer.com/public/weather-maps.json')).json();
+    const f = meta.radar.past.at(-1);
+    if (map.getLayer(id)) map.removeLayer(id);
+    if (map.getSource(id)) map.removeSource(id);
+    map.addSource(id, { type:'raster', tileSize:256, tiles:[`${meta.host}${f.path}/256/{z}/{x}/{y}/2/1_1.png`] });
+    map.addLayer({ id, type:'raster', source:id, paint:{ 'raster-opacity':.6 } });
+    notes.weather = 'RainViewer radar';
+  } catch { notes.weather = 'radar unavailable'; }
+  renderStatus();
+}
+
+async function setLayer(name, visible) {
+  const id = 'l-' + name;
+  if (visible) {
+    on.add(name);
+    if (!map.getSource(id)) await load(name);
+    showLayer(id, true);
+    const r = LAYERS[name].refresh;
+    if (r && !timers[name]) timers[name] = setInterval(() => on.has(name) && load(name), r);
+  } else {
+    on.delete(name); showLayer(id, false);
+    clearInterval(timers[name]); delete timers[name];
+    if (name === 'conflicts') $('events').textContent = 'Enable the conflicts layer.';
+  }
+  syncUrl(); renderStatus();
+}
+function showLayer(id, vis) {
+  for (const l of [id, id + '-lbl']) if (map.getLayer(l)) map.setLayoutProperty(l, 'visibility', vis ? 'visible' : 'none');
+}
+
+// ---------- side feed ----------
+function renderEvents(gj) {
+  const box = $('events'); box.textContent = '';
+  const top = [...gj.features].sort((a, b) => b.properties.mentions - a.properties.mentions).slice(0, 12);
+  if (!top.length) { box.textContent = 'No events in this window yet.'; return; }
+  for (const f of top) {
+    const p = f.properties, d = document.createElement('div'); d.className = 'ev';
+    const b = document.createElement('b'); b.textContent = p.name;
+    const s = document.createElement('small'); s.textContent = `${p.kind} · ${p.count} reports · ${p.mentions} mentions `;
+    if (/^https?:\/\//i.test(p.url)) { const a = document.createElement('a'); a.href = p.url; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = 'source'; s.append(a); }
+    d.append(b, s);
+    d.onclick = ev => { if (ev.target.tagName !== 'A') map.flyTo({ center:f.geometry.coordinates, zoom:Math.max(map.getZoom(), 6) }); };
+    box.append(d);
+  }
+}
+
+// ---------- layer list ----------
+const list = $('layers');
+for (const [name, cfg] of Object.entries(LAYERS)) {
+  const l = document.createElement('label');
+  const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = on.has(name);
+  const dot = document.createElement('span'); dot.className = 'dot'; dot.style.background = dot.style.color = cfg.color;
+  const n = document.createElement('span'); n.className = 'n'; n.id = 'n-' + name;
+  l.append(cb, dot, document.createTextNode(cfg.label || name), n); list.append(l);
+  cb.onchange = () => setLayer(name, cb.checked);
+}
+function updateCounts() { for (const [k, v] of Object.entries(counts)) { const el = $('n-' + k); if (el) el.textContent = v; } }
+
+viewSel.onchange = () => { const v = VIEWS[viewSel.value]; map.flyTo({ center:[v.lon, v.lat], zoom:v.zoom }); };
+trSel.onchange = async () => { for (const n of on) if (LAYERS[n].timeDep) await load(n); syncUrl(); };
+map.on('moveend', syncUrl);
+new ResizeObserver(() => map.resize()).observe($('map'));
+map.on('load', async () => {
+  const initial = [...on]; on.clear();
+  for (const n of initial) await setLayer(n, true);
+  renderStatus();
+});
+</script>
+</body>
+</html>

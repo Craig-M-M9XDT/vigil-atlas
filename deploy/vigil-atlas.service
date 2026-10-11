@@ -1,0 +1,15 @@
+[Unit]
+Description=Vigil Atlas
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/opt/vigil-atlas
+ExecStart=/opt/vigil-atlas/VigilAtlas --urls http://0.0.0.0:5080
+Restart=on-failure
+User=pi
+# Optional: free UCDP token enables the ucdpEvents layer
+# Environment=Ucdp__Token=YOUR_TOKEN
+
+[Install]
+WantedBy=multi-user.target
