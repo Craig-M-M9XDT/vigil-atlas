@@ -120,7 +120,7 @@ const $ = id => document.getElementById(id);
 const viewSel = $('view'), trSel = $('timeRange'), statusEl = $('status');
 viewSel.value = VIEWS[q.get('view')] ? q.get('view') : 'eu';
 trSel.value = ['1h','6h','24h'].includes(q.get('timeRange')) ? q.get('timeRange') : '6h';
-const notes = {}, counts = {}, timers = {}, controllers = {}, versions = {};
+const notes = {}, counts = {}, timers = {}, controllers = {}, versions = {}, lastJson = {};
 let recentConflicts = [];
 
 const map = new maplibregl.Map({
@@ -197,8 +197,11 @@ async function load(name) {
   let res;
   try { res = await fetch(`/api/layers/${name}?hours=${hours()}`, { signal:controller.signal }); if (!res.ok) throw new Error(res.status); }
   catch (e) { if (e.name === 'AbortError') return; notes[name] = 'unavailable (' + e.message + ')'; renderStatus(); return; }
-  const gj = await res.json();
+  const raw = await res.text();
   if (versions[name] !== version || !on.has(name)) return;
+  if (raw === lastJson[name] && map.getSource(id)) return;
+  const gj = JSON.parse(raw);
+  lastJson[name] = raw;
   const note = res.headers.get('X-Layer-Note');
   notes[name] = note ? decodeURIComponent(note) : '';
   counts[name] = gj.features.length;
