@@ -51,11 +51,25 @@
   .pop-r { color:var(--mut); font-size:12px; }
   .pop-r span { color:var(--fg); }
   @media (max-width:760px){ #feed{ display:none; } #tools{right:12px;left:12px;width:auto;max-height:36%;} #panel{ width:auto; right:12px; max-height:45%; } }
+  #tileToolbar{position:fixed;top:10px;left:12px;z-index:10}
+  #tileMenu{position:absolute;top:40px;left:0;width:230px;max-height:75vh;overflow:auto;background:#171630;border:1px solid var(--edge);border-radius:10px;padding:12px}
+  #tileMenu[hidden]{display:none}
+  #tileMenu label{display:flex;gap:8px;padding:6px 2px}
+  #tileDock{position:fixed;right:12px;top:12px;bottom:12px;width:min(370px,calc(100vw - 24px));z-index:4;overflow-y:auto;display:flex;flex-direction:column;gap:10px}
+  #tileDock .dashboard-tile{position:relative!important;left:auto!important;right:auto!important;top:auto!important;bottom:auto!important;width:auto!important;max-height:none!important;flex:none;overflow:visible!important;min-height:58px;padding:12px 14px;box-sizing:border-box}
+  #tileDock #feed{display:block}\n  #tileDock .dashboard-tile[hidden]{display:none!important}
+  .tileHead{display:flex;align-items:center;gap:6px;margin-bottom:8px;background:#151330;padding:6px;border-radius:7px}
+  .tileTitle{flex:1;font-size:12px;font-weight:700;color:var(--fg)}
+  .tileControl{border:1px solid var(--edge);color:var(--fg);background:#282547;border-radius:5px;min-width:27px;min-height:27px;cursor:pointer}
+  .dashboard-tile.collapsed>*:not(.tileHead){display:none!important}
+  @media(max-width:760px){#tileDock{width:min(330px,calc(100vw - 24px));right:12px;top:56px;bottom:8px}#tileToolbar{top:8px;left:12px}#tileMenu{max-height:65vh}}
 </style>
 </head>
 <body>
 <div id="map"></div>
-<div id="panel" class="panel">
+<div id="tileToolbar"><button id="tileMenuButton" class="toolbtn" aria-expanded="false">☷ Dashboard tiles</button><div id="tileMenu" hidden><strong>Show tiles</strong><div id="tileChoices"></div><button class="toolbtn" id="tileReset">Restore defaults</button></div></div>
+<div id="tileDock">
+<div id="panel" class="panel dashboard-tile">
   <h1>Vigil Atlas</h1>
   <select id="view" aria-label="Region">
     <option value="global">Global</option><option value="eu">Europe</option>
@@ -81,29 +95,29 @@
     see <a href="https://github.com/Craig-M-M9XDT/vigil-atlas/blob/main/THIRD_PARTY_NOTICES.md" target="_blank" rel="noopener noreferrer">third-party notices</a>.</p>
   </details>
 </div>
-<div id="feed" class="panel"><h2>Top conflict events</h2><div id="events">Enable the conflicts layer.</div></div>
-<div id="tools" class="panel">
+<div id="feed" class="panel dashboard-tile"><h2>Top conflict events</h2><div id="events">Enable the conflicts layer.</div></div>
+<div id="tools" class="panel dashboard-tile">
   <h2>Live webcams</h2>
   <label for="camUrl">Public YouTube live stream (URL or video ID)</label>
   <input id="camUrl" placeholder="YouTube live URL or video ID" style="width:96%;background:#11132e;color:white;border:1px solid var(--edge);padding:5px" />
   <div><button class="toolbtn" id="camOpen">Open camera</button><button class="toolbtn" id="camClose">Close / stop</button></div>
   <div id="camSlot"></div><small id="camStatus">Camera loads only when opened. Use streams authorised for embedding.</small>
-  <h2 style="margin-top:14px">AI Insights · local Ollama</h2>
+</div><div id="insightsTile" class="panel dashboard-tile"><h2>AI Insights · local Ollama</h2>
   <button class="toolbtn" id="insightRun">Analyse top conflict events</button>
   <div id="insightText" aria-live="polite">On-demand, locally generated summary. Requires Ollama.</div>
 </div>
 
-<section id="markets" aria-label="Market and regional weather">
+<section id="markets" class="panel dashboard-tile" aria-label="Stock watchlist">
   <h2>Markets · watchlist</h2>
   <input id="tickerEntry" aria-label="Stock ticker" maxlength="20" placeholder="AAPL / MSFT / TSLA" />
   <button class="toolbtn" id="tickerAdd">Add stock</button>
   <div id="tickerRows"></div>
   <div id="analystInfo"></div>
-  <h2>Energy prices</h2><div id="energyRows">Refresh to load WTI, Brent and natural gas.</div>
-  <h2>Weather at map centre</h2><div id="regionalWeather">Refresh to load regional conditions.</div>
+</section><section id="energyTile" class="panel dashboard-tile"><h2>Energy prices</h2><div id="energyRows">Refresh to load WTI, Brent and natural gas.</div>
+</section><section id="weatherTile" class="panel dashboard-tile"><h2>Weather at map centre</h2><div id="regionalWeather">Refresh to load regional conditions.</div>
   <button class="toolbtn" id="marketRefresh">Refresh markets and weather</button>
   <small>Market quotes may be delayed. Provider subscription and API key required; values are not investment advice. Weather: Open-Meteo.</small>
-</section>
+</section></div>
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script>
 const CONFLICT_COLOR = ['match',['get','kind'],'Mass violence','#ff2d55','Fight','#ff7a45','#ffb020'];
@@ -404,6 +418,37 @@ async function refreshWeather(){
 }
 $('marketRefresh').onclick=()=>{renderMarkets();refreshEnergy();refreshWeather();};
 renderMarkets();refreshEnergy();refreshWeather();
+const tileDefs=[['panel','Map layers'],['feed','Conflict events'],['tools','Live webcams'],['insightsTile','AI Insights'],['markets','Stock watchlist'],['energyTile','Energy prices'],['weatherTile','Regional weather']];
+const defaults=tileDefs.map(x=>x[0]);let tileSettings;
+try{const s=JSON.parse(localStorage.getItem('vigil.atlas.tiles.v1')||'{}');
+ const order=Array.isArray(s.order)?s.order.filter(x=>defaults.includes(x)):[];
+ tileSettings={order:[...new Set([...order,...defaults])],hidden:Array.isArray(s.hidden)?s.hidden.filter(x=>defaults.includes(x)):[],collapsed:Array.isArray(s.collapsed)?s.collapsed.filter(x=>defaults.includes(x)):[]};
+}catch{tileSettings={order:[...defaults],hidden:[],collapsed:[]};}
+const saveTiles=()=>localStorage.setItem('vigil.atlas.tiles.v1',JSON.stringify(tileSettings));
+function moveTile(id,n){const i=tileSettings.order.indexOf(id),j=i+n;if(j<0||j>=tileSettings.order.length)return;
+ [tileSettings.order[i],tileSettings.order[j]]=[tileSettings.order[j],tileSettings.order[i]];drawTiles();}
+function setTile(id,on){tileSettings.hidden=on?tileSettings.hidden.filter(x=>x!==id):[...new Set([...tileSettings.hidden,id])];if(id==='tools'&&!on)$('camClose').click();drawTiles();}
+function drawTiles(){
+ const dock=$('tileDock'),choices=$('tileChoices');choices.replaceChildren();
+ for(const id of tileSettings.order){
+  const el=$(id),title=tileDefs.find(x=>x[0]===id)[1];dock.append(el);
+  el.hidden=tileSettings.hidden.includes(id);el.classList.toggle('collapsed',tileSettings.collapsed.includes(id));
+  let head=el.querySelector(':scope > .tileHead');
+  if(!head){head=document.createElement('div');head.className='tileHead';const name=document.createElement('span');name.className='tileTitle';head.append(name);el.prepend(head);
+   const btn=(text,tip,fn)=>{const b=document.createElement('button');b.textContent=text;b.title=tip;b.setAttribute('aria-label',tip);b.className='tileControl';b.onclick=fn;head.append(b);};
+   btn('↑','Move '+title+' up',()=>moveTile(id,-1));btn('↓','Move '+title+' down',()=>moveTile(id,1));
+   btn('▣','Collapse or expand '+title,()=>{tileSettings.collapsed=tileSettings.collapsed.includes(id)?tileSettings.collapsed.filter(x=>x!==id):[...tileSettings.collapsed,id];drawTiles();});
+   btn('×','Hide '+title,()=>setTile(id,false));
+  }
+  head.querySelector('.tileTitle').textContent=title;
+  const row=document.createElement('label'),check=document.createElement('input');check.type='checkbox';check.checked=!el.hidden;check.onchange=()=>setTile(id,check.checked);
+  row.append(check,document.createTextNode(title));choices.append(row);
+ }
+ saveTiles();
+}
+$('tileMenuButton').onclick=()=>{const m=$('tileMenu');m.hidden=!m.hidden;$('tileMenuButton').setAttribute('aria-expanded',String(!m.hidden));};
+$('tileReset').onclick=()=>{tileSettings={order:[...defaults],hidden:[],collapsed:[]};drawTiles();};
+drawTiles();
 new ResizeObserver(() => map.resize()).observe($('map'));
 map.on('load', async () => {
   const initial = [...on]; on.clear();
