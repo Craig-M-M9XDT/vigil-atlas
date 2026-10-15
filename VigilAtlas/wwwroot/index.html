@@ -16,6 +16,11 @@
            backdrop-filter:blur(14px); box-shadow:0 0 32px rgba(139,123,255,.18); }
   #panel { left:12px; width:240px; }
   #feed { right:56px; width:290px; }
+  #tools { right:56px; bottom:12px; top:auto; width:290px; max-height:42%; }
+  #camPlayer { width:100%; aspect-ratio:16/9; border:0; background:#080816; }
+  #camLink { color:var(--acc2); }
+  .toolbtn { padding:6px 8px; margin:3px; cursor:pointer; background:#242246; color:#e6e8ff; border:1px solid var(--edge); border-radius:6px; }
+  #insightText { white-space:pre-wrap; font-size:12px; line-height:1.45; max-height:170px; overflow:auto; }
   h1 { font-size:14px; margin:0 0 8px; letter-spacing:.14em; text-transform:uppercase;
        background:linear-gradient(90deg,var(--acc),var(--acc2)); -webkit-background-clip:text; background-clip:text; color:transparent; }
   h2 { font-size:11px; margin:0 0 8px; letter-spacing:.12em; text-transform:uppercase; color:var(--mut); }
@@ -41,7 +46,7 @@
   .pop-t { font-weight:700; margin-bottom:4px; padding-right:12px; }
   .pop-r { color:var(--mut); font-size:12px; }
   .pop-r span { color:var(--fg); }
-  @media (max-width:760px){ #feed{ display:none; } #panel{ width:auto; right:12px; max-height:45%; } }
+  @media (max-width:760px){ #feed{ display:none; } #tools{right:12px;left:12px;width:auto;max-height:36%;} #panel{ width:auto; right:12px; max-height:45%; } }
 </style>
 </head>
 <body>
@@ -73,6 +78,16 @@
   </details>
 </div>
 <div id="feed" class="panel"><h2>Top conflict events</h2><div id="events">Enable the conflicts layer.</div></div>
+<div id="tools" class="panel">
+  <h2>Live webcams</h2>
+  <label for="camUrl">Public YouTube live stream (URL or video ID)</label>
+  <input id="camUrl" placeholder="YouTube live URL or video ID" style="width:96%;background:#11132e;color:white;border:1px solid var(--edge);padding:5px" />
+  <div><button class="toolbtn" id="camOpen">Open camera</button><button class="toolbtn" id="camClose">Close / stop</button></div>
+  <div id="camSlot"></div><small id="camStatus">Camera loads only when opened. Use streams authorised for embedding.</small>
+  <h2 style="margin-top:14px">AI Insights · local Ollama</h2>
+  <button class="toolbtn" id="insightRun">Analyse top conflict events</button>
+  <div id="insightText" aria-live="polite">On-demand, locally generated summary. Requires Ollama.</div>
+</div>
 
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script>
@@ -105,7 +120,8 @@ const $ = id => document.getElementById(id);
 const viewSel = $('view'), trSel = $('timeRange'), statusEl = $('status');
 viewSel.value = VIEWS[q.get('view')] ? q.get('view') : 'eu';
 trSel.value = ['1h','6h','24h'].includes(q.get('timeRange')) ? q.get('timeRange') : '6h';
-const notes = {}, counts = {}, timers = {};
+const notes = {}, counts = {}, timers = {}, controllers = {}, versions = {};
+let recentConflicts = [];
 
 const map = new maplibregl.Map({
   container:'map', style:'https://tiles.openfreemap.org/styles/dark',
@@ -175,10 +191,14 @@ const hours = () => parseInt(trSel.value) || 6;
 async function load(name) {
   const cfg = LAYERS[name], id = 'l-' + name;
   if (cfg.paint === 'raster') return loadRadar(id);
+  controllers[name]?.abort();
+  const controller = new AbortController(); controllers[name] = controller;
+  const version = versions[name] = (versions[name] || 0) + 1;
   let res;
-  try { res = await fetch(`/api/layers/${name}?hours=${hours()}`); if (!res.ok) throw new Error(res.status); }
-  catch (e) { notes[name] = 'unavailable (' + e.message + ')'; renderStatus(); return; }
+  try { res = await fetch(`/api/layers/${name}?hours=${hours()}`, { signal:controller.signal }); if (!res.ok) throw new Error(res.status); }
+  catch (e) { if (e.name === 'AbortError') return; notes[name] = 'unavailable (' + e.message + ')'; renderStatus(); return; }
   const gj = await res.json();
+  if (versions[name] !== version || !on.has(name)) return;
   const note = res.headers.get('X-Layer-Note');
   notes[name] = note ? decodeURIComponent(note) : '';
   counts[name] = gj.features.length;
@@ -190,7 +210,7 @@ async function load(name) {
     map.on('mouseenter', id, () => map.getCanvas().style.cursor = 'pointer');
     map.on('mouseleave', id, () => map.getCanvas().style.cursor = '');
   }
-  if (name === 'conflicts') renderEvents(gj);
+  if (name === 'conflicts') { recentConflicts = gj.features; renderEvents(gj); }
   updateCounts(); renderStatus();
 }
 async function loadRadar(id) {
@@ -215,7 +235,7 @@ async function setLayer(name, visible) {
     const r = LAYERS[name].refresh;
     if (r && !timers[name]) timers[name] = setInterval(() => on.has(name) && load(name), r);
   } else {
-    on.delete(name); showLayer(id, false);
+    on.delete(name); controllers[name]?.abort(); showLayer(id, false);
     clearInterval(timers[name]); delete timers[name];
     if (name === 'conflicts') $('events').textContent = 'Enable the conflicts layer.';
   }
@@ -254,8 +274,50 @@ for (const [name, cfg] of Object.entries(LAYERS)) {
 function updateCounts() { for (const [k, v] of Object.entries(counts)) { const el = $('n-' + k); if (el) el.textContent = v; } }
 
 viewSel.onchange = () => { const v = VIEWS[viewSel.value]; map.flyTo({ center:[v.lon, v.lat], zoom:v.zoom }); };
-trSel.onchange = async () => { for (const n of on) if (LAYERS[n].timeDep) await load(n); syncUrl(); };
+trSel.onchange = async () => { await Promise.all([...on].filter(n => LAYERS[n].timeDep).map(load)); syncUrl(); };
 map.on('moveend', syncUrl);
+// Camera streams are user-selected to avoid broken upstream camera IDs and unwanted background traffic.
+function youtubeId(input) {
+  const s = input.trim();
+  if (/^[A-Za-z0-9_-]{11}$/.test(s)) return s;
+  try {
+    const u = new URL(s);
+    if (u.hostname === 'youtu.be') return /^[A-Za-z0-9_-]{11}$/.test(u.pathname.slice(1)) ? u.pathname.slice(1) : null;
+    if (['youtube.com','www.youtube.com','m.youtube.com'].includes(u.hostname)) {
+      const id = u.pathname.startsWith('/embed/') || u.pathname.startsWith('/live/') ? u.pathname.split('/')[2] : u.searchParams.get('v');
+      return /^[A-Za-z0-9_-]{11}$/.test(id || '') ? id : null;
+    }
+  } catch {}
+  return null;
+}
+$('camOpen').onclick = () => {
+  const id = youtubeId($('camUrl').value);
+  if (!id) { $('camStatus').textContent = 'Enter a valid YouTube video or live-stream URL.'; return; }
+  const frame = document.createElement('iframe');
+  frame.id='camPlayer'; frame.loading='lazy'; frame.referrerPolicy='strict-origin-when-cross-origin';
+  frame.allow='accelerometer; autoplay; encrypted-media; picture-in-picture';
+  frame.allowFullscreen = true;
+  frame.title='User-selected public live camera';
+  frame.src = 'https://www.youtube-nocookie.com/embed/' + id + '?autoplay=1';
+  $('camSlot').replaceChildren(frame);
+  $('camStatus').textContent='Stream availability and embedding depend on the broadcaster.';
+};
+$('camClose').onclick = () => { $('camSlot').replaceChildren(); $('camStatus').textContent='Camera stopped.'; };
+$('insightRun').onclick = async () => {
+  const out = $('insightText'), btn = $('insightRun');
+  const items = recentConflicts.slice(0,25).map(f=> {
+    const p=f.properties || {};
+    return [p.name,p.kind,'mentions '+p.mentions,'count '+p.count,'latest '+p.latest].filter(Boolean).join(' | ');
+  });
+  if (!items.length) { out.textContent='No conflict data loaded yet. Enable conflicts and refresh.'; return; }
+  btn.disabled=true; out.textContent='Analysing with local Ollama…';
+  try {
+    const r = await fetch('/api/insights', { method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({events:items}) });
+    if (!r.ok) throw new Error('Local Ollama is unavailable ('+r.status+'). Install Ollama and pull the configured model.');
+    const data = await r.json();
+    out.textContent = (data.text||'No response')+'\\n\\nAI-generated; verify against original sources.';
+  } catch(e) { out.textContent=e.message; } finally { btn.disabled=false; }
+};
 new ResizeObserver(() => map.resize()).observe($('map'));
 map.on('load', async () => {
   const initial = [...on]; on.clear();
