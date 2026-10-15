@@ -12,6 +12,7 @@ builder.Services.AddHttpClient("ollama", c => { c.Timeout = TimeSpan.FromSeconds
 builder.Services.AddSingleton<TtlCache>();
 builder.Services.AddSingleton<CountryIndex>();
 builder.Services.AddSingleton<Feeds>();
+builder.Services.AddSingleton<MarketService>();
 builder.Services.AddSingleton<OverpassService>();
 builder.Services.AddSingleton<GdeltService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<GdeltService>());
@@ -117,6 +118,31 @@ app.MapPost("/api/insights", async (InsightRequest request, IHttpClientFactory f
     }
     catch (HttpRequestException) { return Results.Problem("Cannot contact local Ollama.", statusCode: 503); }
     catch (TaskCanceledException) when (!ct.IsCancellationRequested) { return Results.Problem("Local AI request timed out.", statusCode: 504); }
+});
+// Market data may be delayed and provider terms may restrict usage.
+app.MapGet("/api/markets/quote/{ticker}", async (string ticker, MarketService market) =>
+{
+    if (!System.Text.RegularExpressions.Regex.IsMatch(ticker, @"^[A-Za-z0-9.^_-]{1,20}$")) return Results.BadRequest(new { error = "Invalid ticker." });
+    try { return Results.Content(await market.Quote(ticker.ToUpperInvariant()), "application/json"); }
+    catch (Exception) { return Results.Problem("Market data source unavailable or rate limited.", statusCode: 503); }
+});
+app.MapGet("/api/markets/analyst/{ticker}", async (string ticker, MarketService market) =>
+{
+    if (!System.Text.RegularExpressions.Regex.IsMatch(ticker, @"^[A-Za-z0-9.^_-]{1,20}$")) return Results.BadRequest(new { error = "Invalid ticker." });
+    try { return Results.Content(await market.Analyst(ticker.ToUpperInvariant()), "application/json"); }
+    catch (Exception) { return Results.Problem("Analyst data unavailable or restricted.", statusCode: 503); }
+});
+app.MapGet("/api/markets/commodities/{name}", async (string name, MarketService market) =>
+{
+    try { return Results.Content(await market.Commodity(name), "application/json"); }
+    catch (Exception) { return Results.Problem("Commodity feed unavailable or restricted.", statusCode: 503); }
+});
+app.MapGet("/api/weather/current", async (double lat, double lon, MarketService market) =>
+{
+    if (!double.IsFinite(lat) || !double.IsFinite(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180)
+        return Results.BadRequest(new { error = "Invalid coordinates." });
+    try { return Results.Content(await market.Weather(lat,lon), "application/json"); }
+    catch (Exception) { return Results.Problem("Weather source unavailable.", statusCode: 503); }
 });
 app.MapGet("/api/health", () => new { ok = true, time = DateTime.UtcNow });
 app.Run();
