@@ -1,0 +1,55 @@
+name: Publish Vigil Atlas v0.3.1
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Check release state
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view v0.3.1 >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Compile
+        if: steps.existing.outputs.exists == 'false'
+        run: dotnet build VigilAtlas/VigilAtlas.csproj -c Release --nologo
+      - name: Publish Windows x64
+        if: steps.existing.outputs.exists == 'false'
+        run: dotnet publish VigilAtlas/VigilAtlas.csproj -c Release -r win-x64 --self-contained true -o out/win-x64
+      - name: Publish Linux ARM64
+        if: steps.existing.outputs.exists == 'false'
+        run: dotnet publish VigilAtlas/VigilAtlas.csproj -c Release -r linux-arm64 --self-contained true -o out/linux-arm64
+      - name: Package ZIP downloads
+        if: steps.existing.outputs.exists == 'false'
+        run: |
+          (cd out/win-x64 && zip -qr ../../VigilAtlas-v0.3.1-win-x64.zip .)
+          (cd out/linux-arm64 && zip -qr ../../VigilAtlas-v0.3.1-linux-arm64.zip .)
+          sha256sum VigilAtlas-v0.3.1-*.zip > SHA256SUMS.txt
+      - name: Publish release and attach binaries
+        if: steps.existing.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.3.1 \
+            VigilAtlas-v0.3.1-win-x64.zip \
+            VigilAtlas-v0.3.1-linux-arm64.zip \
+            SHA256SUMS.txt \
+            --target "$GITHUB_SHA" \
+            --title "Vigil Atlas v0.3.1" \
+            --notes-file docs/V0.3.1-RELEASE.md \
+            --latest
