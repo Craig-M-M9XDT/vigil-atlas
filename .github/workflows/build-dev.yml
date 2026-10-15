@@ -18,3 +18,19 @@ jobs:
         run: dotnet publish VigilAtlas/VigilAtlas.csproj -c Release -r win-x64 --self-contained true -o out/win-x64
       - name: Publish Linux ARM64
         run: dotnet publish VigilAtlas/VigilAtlas.csproj -c Release -r linux-arm64 --self-contained true -o out/linux-arm64
+      - name: Package test downloads
+        run: |
+          cd out/win-x64 && zip -qr ../../VigilAtlas-v0.3.0-dev-win-x64.zip .
+          cd ../linux-arm64 && zip -qr ../../VigilAtlas-v0.3.0-dev-linux-arm64.zip .
+      - name: Upload Windows test build
+        uses: actions/upload-artifact@v4
+        with:
+          name: VigilAtlas-v0.3.0-dev-win-x64
+          path: VigilAtlas-v0.3.0-dev-win-x64.zip
+          retention-days: 30
+      - name: Upload Raspberry Pi test build
+        uses: actions/upload-artifact@v4
+        with:
+          name: VigilAtlas-v0.3.0-dev-linux-arm64
+          path: VigilAtlas-v0.3.0-dev-linux-arm64.zip
+          retention-days: 30
