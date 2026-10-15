@@ -1,0 +1,20 @@
+name: Build Vigil Atlas development
+on:
+  pull_request:
+  push:
+    branches:
+      - feature/v0.3-performance-webcams-ai
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Compile
+        run: dotnet build VigilAtlas/VigilAtlas.csproj -c Release --nologo
+      - name: Publish Windows x64
+        run: dotnet publish VigilAtlas/VigilAtlas.csproj -c Release -r win-x64 --self-contained true -o out/win-x64
+      - name: Publish Linux ARM64
+        run: dotnet publish VigilAtlas/VigilAtlas.csproj -c Release -r linux-arm64 --self-contained true -o out/linux-arm64
