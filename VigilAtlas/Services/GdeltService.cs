@@ -20,6 +20,8 @@ public sealed partial class GdeltService(IHttpClientFactory http, ILogger<GdeltS
     private readonly Dictionary<long, Ev> _events = new();
     private readonly HashSet<string> _files = new();
     private int _loadedFiles;
+    private readonly Dictionary<int, (DateTime Expires, long Version, LayerResult Value)> _queryCache = new();
+    private long _version;
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
@@ -80,6 +82,8 @@ public sealed partial class GdeltService(IHttpClientFactory http, ILogger<GdeltS
                 foreach (var e in batch) _events[e.Id] = e;
                 _files.Add(key);
                 _loadedFiles++;
+                _version++;
+                _queryCache.Clear();
             }
         }
         catch (HttpRequestException) { lock (_lock) _files.Add(key); } // missing file: don't retry forever
@@ -92,6 +96,7 @@ public sealed partial class GdeltService(IHttpClientFactory http, ILogger<GdeltS
         {
             foreach (var k in _events.Where(kv => kv.Value.T < cutoff).Select(kv => kv.Key).ToList()) _events.Remove(k);
             foreach (var f in _files.Where(f => DateTime.ParseExact(f, "yyyyMMddHHmmss", CultureInfo.InvariantCulture) < cutoff).ToList()) _files.Remove(f);
+            _queryCache.Clear();
         }
     }
 
@@ -102,7 +107,13 @@ public sealed partial class GdeltService(IHttpClientFactory http, ILogger<GdeltS
         var cutoff = DateTime.UtcNow.AddHours(-Math.Clamp(hours, 1, 24));
         List<Ev> window;
         int files;
-        lock (_lock) { window = _events.Values.Where(e => e.T >= cutoff).ToList(); files = _loadedFiles; }
+        lock (_lock)
+        {
+            if (_queryCache.TryGetValue(hours, out var cached) && cached.Expires > DateTime.UtcNow && cached.Version == _version)
+                return cached.Value;
+            window = _events.Values.Where(e => e.T >= cutoff).ToList();
+            files = _loadedFiles;
+        }
 
         var features = window.GroupBy(e => (Math.Round(e.Lat, 2), Math.Round(e.Lon, 2)))
             .Select(g =>
@@ -121,7 +132,9 @@ public sealed partial class GdeltService(IHttpClientFactory http, ILogger<GdeltS
                 ["latest"] = x.g.Max(e => e.T).ToString("u"),
             }));
         var note = files == 0 ? "GDELT warming up…" : $"GDELT {Math.Min(files, Files24h)}/{Files24h} files loaded";
-        return new LayerResult(Geo.Collection(features), note);
+        var result = new LayerResult(Geo.Collection(features), note);
+        lock (_lock) _queryCache[hours] = (DateTime.UtcNow.AddSeconds(20), _version, result);
+        return result;
     }
 
     [GeneratedRegex(@"(\d{14})\.export")] private static partial Regex StampRx();
