@@ -15,8 +15,12 @@
            background:var(--panel); border:1px solid var(--edge); border-radius:12px; padding:12px 14px;
            backdrop-filter:blur(14px); box-shadow:0 0 32px rgba(139,123,255,.18); }
   #panel { left:12px; width:240px; }
+  @media(max-width:1000px){#markets{left:12px;bottom:12px;max-height:30%;width:240px}}
   #feed { right:56px; width:290px; }
   #tools { right:56px; bottom:12px; top:auto; width:290px; max-height:42%; }
+  #markets { position:absolute; z-index:3; left:268px; bottom:12px; width:310px; max-height:43%; overflow:auto; background:var(--panel); border:1px solid var(--edge); border-radius:12px; padding:12px; backdrop-filter:blur(14px); }
+  #markets input {max-width:160px; background:#11132e;color:white;border:1px solid var(--edge);padding:5px}
+  #markets .marketRow {border-top:1px solid var(--edge);padding:5px 0}
   #camPlayer { width:100%; aspect-ratio:16/9; border:0; background:#080816; }
   #camLink { color:var(--acc2); }
   .toolbtn { padding:6px 8px; margin:3px; cursor:pointer; background:#242246; color:#e6e8ff; border:1px solid var(--edge); border-radius:6px; }
@@ -89,6 +93,17 @@
   <div id="insightText" aria-live="polite">On-demand, locally generated summary. Requires Ollama.</div>
 </div>
 
+<section id="markets" aria-label="Market and regional weather">
+  <h2>Markets · watchlist</h2>
+  <input id="tickerEntry" aria-label="Stock ticker" maxlength="20" placeholder="AAPL / MSFT / TSLA" />
+  <button class="toolbtn" id="tickerAdd">Add stock</button>
+  <div id="tickerRows"></div>
+  <div id="analystInfo"></div>
+  <h2>Energy prices</h2><div id="energyRows">Refresh to load WTI, Brent and natural gas.</div>
+  <h2>Weather at map centre</h2><div id="regionalWeather">Refresh to load regional conditions.</div>
+  <button class="toolbtn" id="marketRefresh">Refresh markets and weather</button>
+  <small>Market quotes may be delayed. Provider subscription and API key required; values are not investment advice. Weather: Open-Meteo.</small>
+</section>
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script>
 const CONFLICT_COLOR = ['match',['get','kind'],'Mass violence','#ff2d55','Fight','#ff7a45','#ffb020'];
@@ -321,6 +336,74 @@ $('insightRun').onclick = async () => {
     out.textContent = (data.text||'No response')+'\\n\\nAI-generated; verify against original sources.';
   } catch(e) { out.textContent=e.message; } finally { btn.disabled=false; }
 };
+// Watchlist is local to the browser; no credentials are ever stored in it.
+let tickers;
+try {
+  const value = JSON.parse(localStorage.getItem('vigil.atlas.watchlist') || '["AAPL","MSFT"]');
+  tickers = Array.isArray(value) ? value.filter(x=>typeof x==='string' && /^[A-Z0-9.^_-]{1,20}$/.test(x)).slice(0,15) : [];
+} catch { tickers=['AAPL','MSFT']; }
+const saveWatchlist = () => localStorage.setItem('vigil.atlas.watchlist', JSON.stringify(tickers));
+const showValue = v => v === undefined || v === null || v === '' || v === 'None' ? '—' : String(v);
+async function getMarket(path) {
+  const r=await fetch(path); if (!r.ok) throw new Error('Feed unavailable ('+r.status+')');
+  const data=await r.json(); if(data.error || data.Note || data.Information) throw new Error(data.error || data.Note || data.Information);
+  return data;
+}
+async function renderMarkets(){
+  const root=$('tickerRows');root.replaceChildren();
+  for(const ticker of tickers){
+    const row=document.createElement('div');row.className='marketRow';row.textContent=ticker+' · loading… ';
+    const remove=document.createElement('button'); remove.textContent='×';remove.className='toolbtn';
+    remove.title='Remove '+ticker;remove.onclick=()=>{tickers=tickers.filter(x=>x!==ticker);saveWatchlist();renderMarkets();};
+    const analyst=document.createElement('button');analyst.textContent='Analyst';analyst.className='toolbtn';
+    analyst.onclick=async()=>{
+      const box=$('analystInfo');box.textContent='Loading analyst data for '+ticker+'…';
+      try {
+        const d=await getMarket('/api/markets/analyst/'+encodeURIComponent(ticker));
+        box.textContent=ticker+' · '+showValue(d.Name)+' | Target '+showValue(d.AnalystTargetPrice)+
+          ' | Strong buy '+showValue(d.AnalystRatingStrongBuy)+' | Buy '+showValue(d.AnalystRatingBuy)+
+          ' | Hold '+showValue(d.AnalystRatingHold)+' | Sell '+showValue(d.AnalystRatingSell)+
+          ' | Strong sell '+showValue(d.AnalystRatingStrongSell)+
+          '. Provider-supplied analyst data; check currency and update date.';
+      } catch(e) {box.textContent=ticker+' analyst data: '+e.message;}
+    };
+    root.append(row);row.append(analyst,remove);
+    getMarket('/api/markets/quote/'+encodeURIComponent(ticker)).then(d=>{
+      const q=d['Global Quote']||{};
+      row.firstChild.textContent=ticker+' · '+showValue(q['05. price'])+' | change '+showValue(q['10. change percent'])+
+        ' | as of '+showValue(q['07. latest trading day'])+' · ';
+    }).catch(e=>row.firstChild.textContent=ticker+' · '+e.message+' · ');
+  }
+}
+$('tickerAdd').onclick=()=>{
+  const ticker=$('tickerEntry').value.trim().toUpperCase();
+  if(!/^[A-Z0-9.^_-]{1,20}$/.test(ticker) || tickers.length>=15) return;
+  if(!tickers.includes(ticker)) tickers.push(ticker);
+  $('tickerEntry').value='';saveWatchlist();renderMarkets();
+};
+async function refreshEnergy(){
+ const out=$('energyRows');out.replaceChildren();
+ await Promise.all(['WTI','BRENT','NATURAL_GAS'].map(async name=>{
+   const row=document.createElement('div');row.className='marketRow';row.textContent=name+': loading…';out.append(row);
+   try{
+     const d=await getMarket('/api/markets/commodities/'+name);
+     const observation=(d.data||[]).find(x=>x.value!=='.' && x.value!==null);
+     row.textContent=name+': '+showValue(observation?.value)+' '+showValue(d.unit)+' · '+showValue(observation?.date)+
+       (d.interval?' ('+d.interval+')':'')+' · delayed / indicative';
+   }catch(e){row.textContent=name+': '+e.message;}
+ }));
+}
+async function refreshWeather(){
+ const c=map.getCenter(),out=$('regionalWeather');out.textContent='Loading '+c.lat.toFixed(2)+', '+c.lng.toFixed(2)+'…';
+ try{
+  const d=await getMarket('/api/weather/current?lat='+encodeURIComponent(c.lat.toFixed(3))+'&lon='+encodeURIComponent(c.lng.toFixed(3)));
+  const w=d.current||{};
+  out.textContent=showValue(w.temperature_2m)+'°C | Wind '+showValue(w.wind_speed_10m)+' km/h | Humidity '+showValue(w.relative_humidity_2m)+
+   '% | Precipitation '+showValue(w.precipitation)+' mm | WMO code '+showValue(w.weather_code)+' | '+showValue(w.time)+' (local)';
+ }catch(e){out.textContent='Weather: '+e.message;}
+}
+$('marketRefresh').onclick=()=>{renderMarkets();refreshEnergy();refreshWeather();};
+renderMarkets();refreshEnergy();refreshWeather();
 new ResizeObserver(() => map.resize()).observe($('map'));
 map.on('load', async () => {
   const initial = [...on]; on.clear();
